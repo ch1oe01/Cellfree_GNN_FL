@@ -7,6 +7,7 @@ import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
 
+# 假設 channel_env_v2.py 與此檔案在同一目錄下
 from channel_env_v2 import SionnaCellFreeUplinkEnvV2
 
 
@@ -125,7 +126,11 @@ def build_env(fc_hz: float, seed: int = 7):
 
     return SionnaCellFreeUplinkEnvV2(
         num_ap=32,
-        num_ue=16,
+        # ---------------------------------------------------------
+        # 🔥 修改點 1: 用戶數提升至 24 (製造資源稀缺)
+        #    RB=16, UE=24 => Overloaded (1.5倍負載)
+        # ---------------------------------------------------------
+        num_ue=24,
         num_rb=16,
         area_side_m=200.0,
         deployment="street",
@@ -157,42 +162,54 @@ def main():
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
     # -------------------------
-    # Output folder (ALL outputs go here)
+    # Output folder
     # -------------------------
     run_tag = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = ensure_dir(os.path.join("paper_runs", f"{run_tag}_umicf_v3"))
+    out_dir = ensure_dir(os.path.join("paper_runs", f"{run_tag}_umicf_v3_overloaded")) # 加個標籤識別
     figs_dir = ensure_dir(os.path.join(out_dir, "figs"))
     data_dir = ensure_dir(os.path.join(out_dir, "data"))
 
-    # ✅ Three carrier frequencies (paper-like)
+    # ✅ Three carrier frequencies
     fc_list = [3.5e9, 7.0e9, 28.0e9]
     fc_name = {3.5e9: "3.5GHz", 7.0e9: "7GHz", 28.0e9: "28GHz"}
 
-    # ✅ Focus settings (keep clean & paper-like)
+    # ---------------------------------------------------------
+    # 🔥 修改點 2: Focus Settings 策略調整
+    #    目標：展示 L=1 時的擁塞 (PF vs Optimal 差異)
+    #          展示 L=2 時的容量提升 (MU-MIMO Gain)
+    # ---------------------------------------------------------
     focus_settings = [
         # (C, L, scheduler, power_control)
-        (4, 1, "pf", True),
-        (4, 1, "gain", False),
-        (4, 1, "optimal", False),
-        (8, 1, "pf", True),
-        (8, 2, "pf", True),
+        
+        # --- Group A: Overloaded Baseline (L=1) ---
+        # 在 U=24, K=16 下，這組會顯示 "公平性(PF)" 與 "最大速率(Optimal)" 的劇烈權衡
+        (4, 1, "pf", True),       
+        (4, 1, "gain", False),    
+        (4, 1, "optimal", False), 
+
+        # --- Group B: MU-MIMO Capacity (L=2) ---
+        # 每個 RB 可塞 2 人，理論容量變 32，足以容納 24 人。
+        # 這組用來展示 "如果排程器/PC夠強，我們可以救回所有用戶"
+        (4, 2, "pf", True),
     ]
 
-    # Representative configs for CDF plots (must exist in focus_settings)
+    # ---------------------------------------------------------
+    # 🔥 修改點 3: 繪圖代表組 (Reps)
+    #    挑選最能 "說故事" 的幾條線畫在 CDF 上
+    # ---------------------------------------------------------
     reps = [
-        (4, 1, "pf", 1),      # PF + PC
-        (4, 1, "optimal", 0),
-        (4, 1, "gain", 0),
+        (4, 1, "pf", 1),       # 基線：公平但速率受限
+        (4, 1, "optimal", 0),  # 上界：速率高但會餓死 1/3 用戶 (CDF起點會有 33% 是 0)
+        (4, 2, "pf", 1),       # 進階：開啟 MU-MIMO 後的潛力 (應比 L=1 PF 好)
     ]
 
     batch_size = 1
-    steps = 300          # CDF needs enough samples; slow GPU can do 150~200
-    pf_curve_steps = 400 # PF convergence; slow GPU can do 200
+    steps = 300          
+    pf_curve_steps = 400 
 
     out_csv = os.path.join(out_dir, "paper_results.csv")
 
     # store raw outputs for plots
-    # key: (fc, C, L, scheduler, pc_int)
     raw_store = {}
     rows = []
 
@@ -205,7 +222,7 @@ def main():
         env = build_env(fc_hz=fc, seed=7)
 
         for (C, L, scheduler, pc) in focus_settings:
-            env.reset_pf_state()  # fair comparison for PF-like schedulers
+            env.reset_pf_state()  # fair comparison
 
             r = run_collect(
                 env=env,
@@ -241,7 +258,7 @@ def main():
     print(f"\n[Phase-1 Done] time={time.time()-t0:.1f}s")
 
     # -------------------------
-    # Save CSV summary
+    # Save CSV
     # -------------------------
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
@@ -250,9 +267,8 @@ def main():
     print(f"Saved: {out_csv}")
 
     # -------------------------
-    # Save raw samples (npz) for future plotting / paper appendix
+    # Save raw samples (npz)
     # -------------------------
-    # We'll store only what is needed for reps + all focus settings (compact but useful)
     npz_payload = {}
     for k, v in raw_store.items():
         fc, C, L, scheduler, pc = k
@@ -266,7 +282,6 @@ def main():
     # -------------------------
     # Phase 2) CDF plots
     # -------------------------
-    # sanity: ensure reps exist
     def get_key(fc, C, L, scheduler, pc):
         key = (fc, C, L, scheduler, pc)
         if key not in raw_store:
@@ -280,10 +295,11 @@ def main():
             key = get_key(fc, C, L, scheduler, pc)
             data = raw_store[key]["sum_rates"]
             x, y = ecdf(data)
-            plt.plot(x, y, label=f"{fc_name[fc]} | {scheduler} PC={pc} (C={C},L={L})")
+            # 調整 Label 顯示 L，方便辨識
+            plt.plot(x, y, label=f"{fc_name[fc]} | {scheduler} L={L}")
     plt.xlabel("Sum-Rate (bps)")
     plt.ylabel("CDF")
-    plt.title("CDF of Sum-Rate (UMi, street deployment)")
+    plt.title("CDF of Sum-Rate (UMi, U=24 Overloaded)")
     plt.grid(True)
     plt.legend(fontsize=8)
     plt.tight_layout()
@@ -297,12 +313,12 @@ def main():
     for fc in fc_list:
         for (C, L, scheduler, pc) in reps:
             key = get_key(fc, C, L, scheduler, pc)
-            per_ue_all = raw_store[key]["per_ue_rates_all"].reshape(-1)  # [steps*U]
+            per_ue_all = raw_store[key]["per_ue_rates_all"].reshape(-1)
             x, y = ecdf(per_ue_all)
-            plt.plot(x, y, label=f"{fc_name[fc]} | {scheduler} PC={pc} (C={C},L={L})")
+            plt.plot(x, y, label=f"{fc_name[fc]} | {scheduler} L={L}")
     plt.xlabel("Per-UE Throughput (bps)")
     plt.ylabel("CDF")
-    plt.title("CDF of Per-UE Throughput (UMi, street deployment)")
+    plt.title("CDF of Per-UE Throughput (UMi, U=24 Overloaded)")
     plt.grid(True)
     plt.legend(fontsize=8)
     plt.tight_layout()
@@ -312,14 +328,15 @@ def main():
     print(f"Saved: {fpath}")
 
     # -------------------------
-    # Phase 3) PF Convergence curve: avg_rate vs step
+    # Phase 3) PF Convergence curve
     # -------------------------
     plt.figure()
-    pf_curve_store = {}  # save curves too
+    pf_curve_store = {}
     for fc in fc_list:
         env = build_env(fc_hz=fc, seed=7)
         env.reset_pf_state()
 
+        # 這裡也用 U=24, L=1 做收斂測試
         r_pf = run_collect(
             env=env,
             batch_size=batch_size,
@@ -331,24 +348,13 @@ def main():
             record_pf_curve=True
         )
 
-        mean_avg_rate = np.mean(r_pf["pf_curve"], axis=1)  # [steps]
-        p10 = np.percentile(r_pf["pf_curve"], 10, axis=1)
-        p50 = np.percentile(r_pf["pf_curve"], 50, axis=1)
-        p90 = np.percentile(r_pf["pf_curve"], 90, axis=1)
-
-        # Paper-like: plot mean only (clean). If you want, uncomment p10/p50/p90
+        mean_avg_rate = np.mean(r_pf["pf_curve"], axis=1)
         plt.plot(mean_avg_rate, label=f"{fc_name[fc]} mean")
-
-        # Optional (more paper-like, but busier):
-        # plt.plot(p10, linestyle="--", alpha=0.6, label=f"{fc_name[fc]} p10")
-        # plt.plot(p50, linestyle="-.", alpha=0.6, label=f"{fc_name[fc]} p50")
-        # plt.plot(p90, linestyle=":", alpha=0.6, label=f"{fc_name[fc]} p90")
-
         pf_curve_store[f"{fc_name[fc]}__pf_curve"] = r_pf["pf_curve"]
 
     plt.xlabel("Step")
     plt.ylabel("Mean PF avg_rate (bps)")
-    plt.title("PF Convergence: mean(avg_rate) vs step (C=4, L=1, PC=True)")
+    plt.title("PF Convergence: mean(avg_rate) vs step (U=24, L=1)")
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
@@ -375,7 +381,7 @@ def main():
     plt.plot(fcs, fairs, marker="o")
     plt.xlabel("Carrier Frequency")
     plt.ylabel("Jain Fairness")
-    plt.title("PF Fairness vs Carrier Frequency (C=4, L=1, PC=True)")
+    plt.title("PF Fairness vs Carrier Frequency (U=24, L=1)")
     plt.grid(True)
     plt.tight_layout()
     fpath = os.path.join(figs_dir, "pf_fairness_fc.png")
@@ -384,34 +390,22 @@ def main():
     print(f"Saved: {fpath}")
 
     # -------------------------
-    # README (settings summary)
+    # README
     # -------------------------
-    readme = f"""Paper-style baseline run (UMi cell-free uplink)
+    readme = f"""Paper-style baseline run (UMi cell-free uplink) - OVERLOADED
 =================================================
 
 Output folder: {out_dir}
 
-Common env config:
-- Scenario: 3GPP TR 38.901 UMi (uplink), street deployment
-- A=32 APs, U=16 UEs, K=16 RB-slices
-- area=200m x 200m, street_block=50m, indoor_prob=0.2
-- AP height=10m, UE height=1.5m
-- Nr=16 (AP rx ants), Nt=1 (UE tx ants)
-- RB bandwidth W=180 kHz, NF=7 dB, pmax=0.2 W
-- Carrier frequencies: {', '.join([fc_name[f] for f in fc_list])}
-- steps(CDF)={steps}, steps(PF curve)={pf_curve_steps}, batch_size={batch_size}
-- Focus settings: {focus_settings}
-- Reps for CDF plots: {reps}
+Config:
+- U=24 (Overloaded), K=16, A=32
+- Scenarios:
+  1. L=1 (Baseline): 24 users compete for 16 RBs. Expect high contention.
+  2. L=2 (MU-MIMO): 24 users share 32 slots (16*2). Expect higher capacity.
 
-Files:
-- paper_results.csv : summary table (mean/p50/p95/fairness/nan_count)
-- data/raw_samples.npz : sum-rate + per-UE raw samples for all focus settings
-- data/pf_curves.npz : PF avg_rate curves (EMA state) for each fc
-- figs/*.png : all plots
-
-Notes:
-- CDF plots flatten per-UE throughput across (steps x U) samples (paper common).
-- PF convergence plot uses mean(avg_rate) vs step (clean paper style).
+Focus:
+- Compare PF fairness vs Optimal sum-rate under scarcity.
+- Evaluate MU-MIMO gain (L=2 vs L=1).
 """
     save_readme(out_dir, readme)
 

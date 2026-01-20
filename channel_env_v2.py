@@ -18,7 +18,7 @@ class SionnaCellFreeUplinkEnvV2:
         # Topology (UMi)
         # -------------------------
         num_ap: int = 32,        # A
-        num_ue: int = 16,        # U 
+        num_ue: int = 24,        # U 
         num_rb: int = 16,        # K 
         area_side_m: float = 200.0,
         deployment: str = "street",    # "street" (推薦) or "uniform"
