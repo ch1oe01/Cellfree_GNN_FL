@@ -1,0 +1,4 @@
+tensorflow==2.15.0
+sionna==0.19.2
+numpy==1.26.4
+tqdm==4.66.4
