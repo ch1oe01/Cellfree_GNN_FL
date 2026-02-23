@@ -5,13 +5,16 @@ from dataclasses import replace
 from utils import SimConfig, set_seed, assert_feasible
 from runner import run_baseline
 
-
 def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--drops", type=int, default=30)
-    p.add_argument("--seed", type=int, default=1234)
+    p = argparse.ArgumentParser(description="Cell-Free Network Simulation")
+    p.add_argument("--drops", type=int, default=30, help="Number of Monte-Carlo drops")
+    p.add_argument("--seed", type=int, default=1234, help="Random seed")
 
-    # 允許覆寫常用參數
+    # [建議新增] 讓測試更方便的參數
+    p.add_argument("--n_ap", type=int, default=None, help="Number of APs")
+    p.add_argument("--n_ue", type=int, default=None, help="Number of UEs")
+
+    # 其他參數覆寫
     p.add_argument("--M", type=int, default=None)
     p.add_argument("--Q", type=int, default=None)
     p.add_argument("--K", type=int, default=None)
@@ -27,32 +30,40 @@ def main():
 
     cfg = SimConfig(seed=args.seed)
 
-    # 覆寫
+    # 覆寫參數
+    # 加入 n_ap 和 n_ue 到覆寫清單
+    override_keys = [
+        "n_ap", "n_ue", "M", "Q", "K", "tau_p", "TopL", "Ca", 
+        "ao_iters", "wmmse_iters"
+    ]
+    
     kw = {}
-    for name in ["M", "Q", "K", "tau_p", "TopL", "Ca", "ao_iters", "wmmse_iters"]:
-        v = getattr(args, name)
-        if v is not None:
-            kw[name] = v
+    for name in override_keys:
+        if hasattr(args, name):
+            v = getattr(args, name)
+            if v is not None:
+                kw[name] = v
     if kw:
         cfg = replace(cfg, **kw)
 
     assert_feasible(cfg)
     set_seed(cfg.seed)
 
-    print("=== Baseline V1 (6G-realistic) Settings ===")
-    print(f"A={cfg.n_ap}, U={cfg.n_ue}, M={cfg.M}, K={cfg.K}, Q={cfg.Q}")
-    print(f"TopL={cfg.TopL}, Ca={cfg.Ca}")
-    print(f"tau_c={cfg.tau_c}, tau_p={cfg.tau_p} (pilot reuse enabled)")
+    print("=== Advanced Baseline (AO+WMMSE) Settings ===")
+    print(f"AP={cfg.n_ap}, UE={cfg.n_ue}, M={cfg.M}")
+    print(f"RBs(K)={cfg.K}, Reuse(Q)={cfg.Q}")
+    print(f"Cluster(TopL)={cfg.TopL}, LoadLimit(Ca)={cfg.Ca}")
+    print(f"Pilots(tau_p)={cfg.tau_p}")
     print(f"AO iters={cfg.ao_iters}, WMMSE iters={cfg.wmmse_iters}")
-    print("==========================================")
+    print("=============================================")
 
     mean_sr, std_sr, elapsed, _ = run_baseline(cfg, args.drops, show_progress=True)
 
     print("\n========== Results ==========")
-    print(f"drops={args.drops}")
-    print(f"Sum-rate (prelog applied): {mean_sr:.3f} ± {std_sr:.3f}")
-    print(f"elapsed: {elapsed:.1f}s")
-    print("================================\n")
+    print(f"Drops: {args.drops}")
+    print(f"Sum-rate (Prelog applied): {mean_sr:.3f} ± {std_sr:.3f} bits/s/Hz")
+    print(f"Total Time: {elapsed:.1f} s")
+    print("=============================\n")
 
 
 if __name__ == "__main__":

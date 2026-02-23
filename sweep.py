@@ -7,8 +7,8 @@ from dataclasses import replace
 from utils import SimConfig, assert_feasible
 from runner import run_baseline
 
-
-ALLOWED = {"Q", "M", "tau_p", "TopL", "Ca", "K", "ao_iters", "wmmse_iters"}
+# 修改 1: 在 ALLOWED 集合中加入 "n_ap"
+ALLOWED = {"Q", "M", "tau_p", "TopL", "Ca", "K", "ao_iters", "wmmse_iters", "n_ap"}
 
 
 def main():
@@ -31,8 +31,8 @@ def main():
 
     rows = []
     for i, val in enumerate(args.values):
-        # 對整數參數自動轉 int
-        if vary in {"Q", "M", "tau_p", "TopL", "Ca", "K", "ao_iters", "wmmse_iters"}:
+        # 修改 2: 確保 n_ap 也會被正確轉為整數 (int)
+        if vary in {"Q", "M", "tau_p", "TopL", "Ca", "K", "ao_iters", "wmmse_iters", "n_ap"}:
             val = int(val)
 
         cfg = replace(base_cfg, **{vary: val})
